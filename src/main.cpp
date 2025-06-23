@@ -6,15 +6,16 @@
 #include <ArduinoJson.h>
 
 // Konfigurasi pin untuk GPS
-#define GPS_RX 17 // Pin RX ESP32 terhubung ke TX GPSY
-#define GPS_TX 16 // Pin TX ESP32 terhubung ke RX GPS
+#define GPS_RX 17        // Pin RX ESP32 terhubung ke TX GPSY
+#define GPS_TX 16        // Pin TX ESP32 terhubung ke RX GPS
+#define SOS_BUTTON_PIN 4 // GPIO4 untuk tombol SOS
 
 // Konfigurasi WiFi
 const char *ssid = "Samsung";
 const char *password = "tidakada";
 
 // Konfigurasi Telegram Bot
-const String botToken = "7821626558:AAHf0ZRPg2cbhHToxfd0gG3bguA9sGf5Yv0";
+const String botToken = "7934314905:AAGgD3fV7Y0hkPSUvPZpgy62sDO1KJ2yH2w";
 const String chatId = "1300764591";
 const String telegramApiUrl = "https://api.telegram.org/bot" + botToken;
 
@@ -36,10 +37,15 @@ unsigned long lastCommandCheck = 0;
 unsigned long lastZoneAlert = 0;                       // Tambahkan variabel untuk tracking alert
 const unsigned long TELEGRAM_UPDATE_INTERVAL = 300000; // 5 menit
 const unsigned long COMMAND_CHECK_INTERVAL = 5000;     // Cek perintah setiap 5 detik
-const unsigned long ZONE_ALERT_INTERVAL = 30000;       // Alert setiap 30 detik
+const unsigned long ZONE_ALERT_INTERVAL = 15000;       // Alert setiap 15 detik
 
 // Tambahkan variabel untuk tracking update ID
 unsigned long lastUpdateId = 0;
+
+// Variabel untuk tombol SOS
+bool lastSosButtonState = HIGH; // Asumsi tombol aktif LOW (karena ke GND)
+unsigned long lastDebounceTime = 0;
+const unsigned long debounceDelay = 50; // 50 ms debounce
 
 // Function Prototypes
 void sendTelegramMessage(String message);
@@ -82,10 +88,34 @@ void setup()
   Serial.println("-------------------------------------");
 
   delay(2000);
+
+  pinMode(SOS_BUTTON_PIN, INPUT_PULLUP); // Tombol ke GND, aktif LOW
 }
 
 void loop()
 {
+  // Cek tombol SOS
+  int sosButtonState = digitalRead(SOS_BUTTON_PIN);
+  if (sosButtonState != lastSosButtonState)
+  {
+    lastDebounceTime = millis();
+    lastSosButtonState = sosButtonState;
+  }
+  if (sosButtonState == LOW && (millis() - lastDebounceTime) > debounceDelay)
+  {
+    for (int i = 1; i <= 3; i++)
+    {
+      sendTelegramMessage("🚨 SOS! Pengguna menekan tombol darurat! Segera cek lokasi! [" + String(i) + "/3]");
+      sendLocationToTelegram();
+      delay(1000); // Delay 1 detik antar notifikasi
+    }
+    // Tunggu sampai tombol dilepas agar tidak spam
+    while (digitalRead(SOS_BUTTON_PIN) == LOW)
+    {
+      delay(10);
+    }
+  }
+
   // Baca data dari GPS
   while (GPSSerial.available() > 0)
   {
@@ -255,7 +285,7 @@ void processCommand(String command)
     {
       double distance = calculateDistance(HOME_LAT, HOME_LNG, gps.location.lat(), gps.location.lng());
 
-      String msg = "📊 **Status Zona Aman**\n";
+      String msg = "📊 Status Zona Aman\n";
       msg += "📍 Koordinat rumah:\n";
       msg += "Lat: " + String(HOME_LAT, 6) + "\n";
       msg += "Lng: " + String(HOME_LNG, 6) + "\n";
@@ -276,13 +306,13 @@ void processCommand(String command)
   }
   else if (command == "/help")
   {
-    String helpMsg = "📱 **Perintah yang Tersedia**\n\n";
-    helpMsg += "📍 **/lokasi** - Cek posisi saat ini\n";
-    helpMsg += "🏠 **/setrumah** - Set koordinat rumah dari posisi saat ini\n";
-    helpMsg += "📏 **/setradius [meter]** - Set radius zona aman\n";
-    helpMsg += "📊 **/status** - Cek status zona aman\n";
-    helpMsg += "❓ **/help** - Tampilkan bantuan ini\n\n";
-    helpMsg += "💡 **Tips:**\n";
+    String helpMsg = "📱 Perintah yang Tersedia\n\n";
+    helpMsg += "📍 /lokasi - Cek posisi saat ini\n";
+    helpMsg += "🏠 /setrumah - Set koordinat rumah dari posisi saat ini\n";
+    helpMsg += "📏 /setradius [meter] - Set radius zona aman\n";
+    helpMsg += "📊 /status - Cek status zona aman\n";
+    helpMsg += "❓ /help - Tampilkan bantuan ini\n\n";
+    helpMsg += "💡 Tips: \n";
     helpMsg += "• Gunakan /setrumah saat berada di rumah\n";
     helpMsg += "• Radius default: 200m\n";
     helpMsg += "• Maksimal radius: 10km";
@@ -367,7 +397,7 @@ void checkSafeZone()
       }
       else if (millis() - lastZoneAlert >= ZONE_ALERT_INTERVAL)
       {
-        // Alert berulang setiap 30 detik
+        // Alert berulang setiap 15 detik
         String repeatAlertMsg = "🚨 PERINGATAN BERULANG! MASIH KELUAR ZONA AMAN!\n";
         repeatAlertMsg += "📍 Jarak dari rumah: " + String(distance, 0) + "m\n";
         repeatAlertMsg += "⚠️ Melebihi batas " + String(SAFE_ZONE_RADIUS) + "m!\n";
