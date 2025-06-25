@@ -15,7 +15,7 @@ const char *ssid = "Samsung";
 const char *password = "tidakada";
 
 // Konfigurasi Telegram Bot
-const String botToken = "7934314905:AAGgD3fV7Y0hkPSUvPZpgy62sDO1KJ2yH2w";
+const String botToken = "7821626558:AAHf0ZRPg2cbhHToxfd0gG3bguA9sGf5Yv0";
 const String chatId = "1300764591";
 const String telegramApiUrl = "https://api.telegram.org/bot" + botToken;
 
@@ -496,7 +496,7 @@ void sendLocationToTelegram()
       // Kirim info tambahan
       double distance = calculateDistance(HOME_LAT, HOME_LNG, gps.location.lat(), gps.location.lng());
 
-      String infoMessage = "📍 **Lokasi Saat Ini**\n";
+      String infoMessage = "📍 Lokasi Saat Ini \n";
       infoMessage += "Lat: " + String(gps.location.lat(), 6) + "\n";
       infoMessage += "Lng: " + String(gps.location.lng(), 6) + "\n";
       infoMessage += "🏠 Jarak dari rumah: " + String(distance, 0) + "m\n";
