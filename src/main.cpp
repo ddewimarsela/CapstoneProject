@@ -4,15 +4,12 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <WiFiMulti.h>
 
 // Konfigurasi pin untuk GPS
 #define GPS_RX 17        // Pin RX ESP32 terhubung ke TX GPSY
 #define GPS_TX 16        // Pin TX ESP32 terhubung ke RX GPS
 #define SOS_BUTTON_PIN 4 // GPIO4 untuk tombol SOS
-
-// Konfigurasi WiFi
-const char *ssid = "Samsung";
-const char *password = "tidakada";
 
 // Konfigurasi Telegram Bot
 const String botToken = "7821626558:AAHf0ZRPg2cbhHToxfd0gG3bguA9sGf5Yv0";
@@ -45,7 +42,12 @@ unsigned long lastUpdateId = 0;
 // Variabel untuk tombol SOS
 bool lastSosButtonState = HIGH; // Asumsi tombol aktif LOW (karena ke GND)
 unsigned long lastDebounceTime = 0;
-const unsigned long debounceDelay = 50; // 50 ms debounce
+const unsigned long debounceDelay = 50;    // 50 ms debounce
+bool sosActive = false;                    // Status apakah SOS sedang aktif
+unsigned long sosStartTime = 0;            // Waktu mulai SOS
+const unsigned long SOS_DURATION = 180000; // 3 menit dalam millisecond
+const unsigned long SOS_INTERVAL = 10000;  // 10 detik interval
+unsigned long lastSosMessage = 0;          // Waktu terakhir kirim pesan SOS
 
 // Function Prototypes
 void sendTelegramMessage(String message);
@@ -57,6 +59,8 @@ void handleTelegramCommands();
 String getUpdates();
 void processCommand(String command);
 
+WiFiMulti wifiMulti;
+
 void setup()
 {
   // Inisialisasi Serial Monitor
@@ -64,10 +68,15 @@ void setup()
   Serial.println("\n\nESP32 GPS + Zona Aman + Telegram Bot");
   Serial.println("-------------------------------------");
 
-  // Koneksi WiFi
-  WiFi.begin(ssid, password);
+  // Tambahkan beberapa WiFi
+  wifiMulti.addAP("Samsung", "tidakada");
+  wifiMulti.addAP("POCO X3 Pro", "123456789");
+  wifiMulti.addAP("aku", "12345678");
+  wifiMulti.addAP("dev", "frahestu");
+  wifiMulti.addAP("UPB", "kompetitif1");
+
   Serial.print("Menghubungkan ke WiFi");
-  while (WiFi.status() != WL_CONNECTED)
+  while (wifiMulti.run() != WL_CONNECTED)
   {
     delay(500);
     Serial.print(".");
@@ -90,6 +99,7 @@ void setup()
   delay(2000);
 
   pinMode(SOS_BUTTON_PIN, INPUT_PULLUP); // Tombol ke GND, aktif LOW
+  lastSosMessage = 0;                    // Inisialisasi waktu terakhir pesan SOS
 }
 
 void loop()
@@ -103,16 +113,50 @@ void loop()
   }
   if (sosButtonState == LOW && (millis() - lastDebounceTime) > debounceDelay)
   {
-    for (int i = 1; i <= 3; i++)
+    if (!sosActive)
     {
-      sendTelegramMessage("🚨 SOS! Pengguna menekan tombol darurat! Segera cek lokasi! [" + String(i) + "/3]");
-      sendLocationToTelegram();
-      delay(1000); // Delay 1 detik antar notifikasi
+      // Mulai mode SOS
+      sosActive = true;
+      sosStartTime = millis();
+      sendTelegramMessage("🚨 MODE SOS DIAKTIFKAN! Pengguna menekan tombol darurat!");
     }
-    // Tunggu sampai tombol dilepas agar tidak spam
-    while (digitalRead(SOS_BUTTON_PIN) == LOW)
+    else
     {
-      delay(10);
+      // Hentikan mode SOS secara manual
+      sosActive = false;
+      sendTelegramMessage("✅ Mode SOS dihentikan secara manual oleh pengguna.");
+    }
+  }
+
+  // Logika pengiriman pesan SOS selama 3 menit
+  if (sosActive)
+  {
+    unsigned long currentTime = millis();
+    unsigned long elapsedTime = currentTime - sosStartTime;
+
+    // Cek apakah masih dalam durasi 3 menit
+    if (elapsedTime <= SOS_DURATION)
+    {
+      // Cek apakah sudah waktunya kirim pesan (setiap 10 detik)
+      if (currentTime - lastSosMessage >= SOS_INTERVAL)
+      {
+        int messageCount = (elapsedTime / SOS_INTERVAL) + 1;
+        int remainingSeconds = (SOS_DURATION - elapsedTime) / 1000;
+
+        String sosMessage = "🚨 SOS! Pengguna menekan tombol darurat! Segera cek lokasi!\n";
+        sosMessage += "📱 Pesan ke-" + String(messageCount) + "\n";
+        sosMessage += "⏰ Sisa waktu: " + String(remainingSeconds) + " detik";
+
+        sendTelegramMessage(sosMessage);
+        sendLocationToTelegram();
+        lastSosMessage = currentTime;
+      }
+    }
+    else
+    {
+      // Durasi 3 menit sudah habis, hentikan SOS
+      sosActive = false;
+      sendTelegramMessage("✅ Mode SOS selesai setelah 3 menit. Status kembali normal.");
     }
   }
 
@@ -140,7 +184,7 @@ void loop()
         startupMsg += "• /lokasi - Cek posisi saat ini\n";
         startupMsg += "• /setrumah - Set koordinat rumah dari posisi saat ini\n";
         startupMsg += "• /setradius [meter] - Set radius zona aman\n";
-        startupMsg += "• /status - Cek status zona aman\n";
+        startupMsg += "• /sos_stop - Matikan mode SOS (jika sedang aktif)\n";
         startupMsg += "• /help - Tampilkan bantuan";
         sendTelegramMessage(startupMsg);
         startupMessageSent = true;
@@ -311,13 +355,27 @@ void processCommand(String command)
     helpMsg += "🏠 /setrumah - Set koordinat rumah dari posisi saat ini\n";
     helpMsg += "📏 /setradius [meter] - Set radius zona aman\n";
     helpMsg += "📊 /status - Cek status zona aman\n";
+    helpMsg += "🚨 /sos_stop - Matikan mode SOS (jika sedang aktif)\n";
     helpMsg += "❓ /help - Tampilkan bantuan ini\n\n";
     helpMsg += "💡 Tips: \n";
     helpMsg += "• Gunakan /setrumah saat berada di rumah\n";
     helpMsg += "• Radius default: 200m\n";
-    helpMsg += "• Maksimal radius: 10km";
+    helpMsg += "• Maksimal radius: 10km\n";
+    helpMsg += "• Mode SOS bisa dimatikan via Telegram atau tombol";
 
     sendTelegramMessage(helpMsg);
+  }
+  else if (command == "/sos_stop")
+  {
+    if (sosActive)
+    {
+      sosActive = false;
+      sendTelegramMessage("✅ Mode SOS berhasil dimatikan melalui Telegram!");
+    }
+    else
+    {
+      sendTelegramMessage("ℹ️ Mode SOS tidak sedang aktif.");
+    }
   }
 }
 
